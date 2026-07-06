@@ -105,7 +105,7 @@
 
 			//Minimize button
 
-			system(
+			int dummy = system(
 				"xdotool search --name 'F16:' windowfocus && "
 				"WIN=$(xdotool search --name 'F16:') && "
 				"GEOM=$(xdotool getwindowgeometry $WIN) && "
@@ -123,12 +123,12 @@
 
 			else Test_print(t, "WARN: minimize click didn't set IsMinimized (compositor-dependent)");
 
-			system("xdotool search --name 'F16:' windowactivate --sync");    //Restore via windowactivate
+			dummy = system("xdotool search --name 'F16:' windowactivate --sync");    //Restore via windowactivate
 			pump(500 * MS);
 
 			//Maximize button (x = width - BTN_W * 3 / 2 + BTN_W / 2 = width - BTN_W)
 
-			system(
+			dummy = system(
 				"WIN=$(xdotool search --name 'F16:') && "
 				"xdotool mousemove --window $WIN "
 					"$(($(xdotool getwindowgeometry --shell $WIN | grep WIDTH | cut -d= -f2) - 115)) 16 "
@@ -144,12 +144,14 @@
 
 			//Un-maximize
 
-			system(
+			dummy = system(
 				"WIN=$(xdotool search --name 'F16:') && "
 				"xdotool mousemove --window $WIN "
 					"$(($(xdotool getwindowgeometry --shell $WIN | grep WIDTH | cut -d= -f2) - 115)) 16 "
 				"&& xdotool click 1"
 			);
+
+			(void) dummy;
 
 			pump(500 * MS);
 		}

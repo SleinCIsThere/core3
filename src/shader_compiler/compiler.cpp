@@ -52,6 +52,26 @@ const C8 *types =
 	#include "shader_compiler/shaders/types.hlsli"
 	;
 
+const C8 *flp =
+	#include "shader_compiler/shaders/flp.hlsli"
+	;
+
+const C8 *fixedPoint =
+	#include "shader_compiler/shaders/fixed_point.hlsli"
+	;
+
+const C8 *matrixTypes =
+	#include "shader_compiler/shaders/matrix_types.hlsli"
+	;
+
+const C8 *matrix =
+	#include "shader_compiler/shaders/matrix.hlsli"
+	;
+
+const C8 *constants =
+	#include "shader_compiler/shaders/constants.hlsli"
+	;
+
 const C8 *nvHLSLExtns =
 	#include "nvHLSLExtns.h"
 	;
@@ -323,6 +343,21 @@ public:
 
 				else if(CharString_equalsCStringInsensitive(resolved, "@types.hlsli"))
 					tmpTmp = CharString_createRefCStrConst(types);
+
+				else if(CharString_equalsCStringInsensitive(resolved, "@matrix.hlsli"))
+					tmpTmp = CharString_createRefCStrConst(matrix);
+
+				else if(CharString_equalsCStringInsensitive(resolved, "@matrix_types.hlsli"))
+					tmpTmp = CharString_createRefCStrConst(matrixTypes);
+
+				else if(CharString_equalsCStringInsensitive(resolved, "@constants.hlsli"))
+					tmpTmp = CharString_createRefCStrConst(constants);
+
+				else if(CharString_equalsCStringInsensitive(resolved, "@flp.hlsli"))
+					tmpTmp = CharString_createRefCStrConst(flp);
+
+				else if(CharString_equalsCStringInsensitive(resolved, "@fixed_point.hlsli"))
+					tmpTmp = CharString_createRefCStrConst(fixedPoint);
 
 				else if(CharString_equalsCStringInsensitive(resolved, "@nvShaderExtnEnums.h"))
 					tmpTmp = CharString_createRefCStrConst(nvShaderExtnEnums);

@@ -17,18 +17,38 @@
 # To prevent this a separate license will have to be requested at contact@osomi.net for a premium;
 # This is called dual licensing.
 
-find_package(Python3)
+file(GLOB_RECURSE aiuHeaders "../../include/aiu/*.h")
+file(GLOB_RECURSE aiuSharedHeaders "../../include/aiu/shared/*.h")
+file(GLOB aiuSources "*.c")
 
-add_custom_target(check_style ALL
-    COMMAND ${CMAKE_COMMAND} -E echo "-- Running OxC3 style check..."
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/check_style.py ${CMAKE_SOURCE_DIR} --no-todo-report
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "OxC3 style check"
-    VERBATIM
+add_library(
+	OxC3_aiu
+	STATIC
+	${aiuHeaders}
+	${aiuSharedHeaders}
+	${aiuSources}
+	CMakeLists.txt
 )
 
-set_target_properties(check_style PROPERTIES FOLDER Oxsomi/tools)
+source_group("Header Files (shared)" FILES ${aiuSharedHeaders})
 
-# if(EnableOxC3CLI)
-#     add_subdirectory(oxc3_cli)
-# endif()
+set_target_properties(OxC3_aiu PROPERTIES FOLDER Oxsomi/aiu)
+target_include_directories(OxC3_aiu PUBLIC "../../include")
+target_link_libraries(OxC3_aiu PUBLIC OxC3_platforms OxC3_types_base OxC3_types_math OxC3_types_container)
+
+if(EnableTests)
+
+	file(GLOB aiuTests "test/*.c")
+
+	add_executable(
+		OxC3_aiu_test
+		${aiuTests}
+		CMakeLists.txt
+	)
+
+	set_target_properties(OxC3_aiu_test PROPERTIES FOLDER Oxsomi/aiu)
+	target_link_libraries(OxC3_aiu_test PUBLIC OxC3_aiu OxC3_types_container_test_util)
+	target_include_directories(OxC3_aiu_test PUBLIC "test")
+	add_test(NAME OxC3_aiu_test COMMAND OxC3_aiu_test)
+
+endif()

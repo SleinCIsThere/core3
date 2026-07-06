@@ -274,6 +274,9 @@ Bool MemoryStream_createFromBufferRegion(
 			"MemoryStream_createFromBufferRegion() buffer is too small"
 		));
 
+	if(!length)
+		length = bufl;
+
 	buffer.lengthAndRefBits &= (U64)3 << 62;
 	buffer.lengthAndRefBits |= length;
 

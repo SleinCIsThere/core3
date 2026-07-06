@@ -105,9 +105,16 @@ static inline Bool Buffer_isUTF16(const Buffer buf, F32 threshold) { return Buff
 //    https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html
 
 //CRC32 Castagnoli / iSCSI polynomial (0x82f63b78) not for ethernet/zip (0xedb88320)!
-U32 Buffer_crc32cChained(const Buffer buf, U32 crcPrev);
 
-U32 Buffer_crc32cFallbackChained(const Buffer buf, U32 crcPrev);        //In case of no native CRC32C, but don't manually call
+U32 Buffer_crc32cFallbackChained(const Buffer buf, U32 crcPrev);   //In case of no native CRC32C, but don't manually call
+
+#if _SIMD == SIMD_NONE
+	static inline U32 Buffer_crc32cChained(const Buffer buf, U32 crcPrev) {
+		return Buffer_crc32cFallbackChained(buf, crcPrev);
+	}
+#else
+	U32 Buffer_crc32cChained(const Buffer buf, U32 crcPrev);
+#endif
 
 static inline U32 Buffer_crc32cFallback(const Buffer buf) {        //In case of no native CRC32C, but don't manually call
 	return Buffer_crc32cFallbackChained(buf, 0);

@@ -229,7 +229,8 @@ static void Test_mouse(Test *t) {
 
 		if (!isSingleWindow() && hasXdotool()) {
 
-			system("xdotool search --name 'F8: Left-click anywhere to pass' windowfocus click 1");
+			int dummy = system("xdotool search --name 'F8: Left-click anywhere to pass' windowfocus click 1");
+			(void) dummy;
 
 			Ns waited = 0;
 
@@ -849,7 +850,7 @@ static void Test_mouseDraw(Test *t) {
 
 			//Move to centre, mousedown, drag, mouseup
 
-			system(
+			int dummy = system(
 				"WIN=$(xdotool search --name 'F18:') && "
 				"xdotool mousemove --window $WIN 128 128 && "
 				"xdotool mousedown 1"
@@ -863,7 +864,7 @@ static void Test_mouseDraw(Test *t) {
 					"xdotool mousemove --window $WIN %d 128", 128 + dx
 				);
 
-				system(cmd);
+				dummy = system(cmd);
 				Thread_sleep(16 * MS);
 				WindowManager_step(&windowManager, NULL, NULL);
 
@@ -874,7 +875,8 @@ static void Test_mouseDraw(Test *t) {
 					presentQuiet(w);
 			}
 
-			system("xdotool mouseup 1");
+			dummy = system("xdotool mouseup 1");
+			(void) dummy;
 			pump(200 * MS);
 		}
 
