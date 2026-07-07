@@ -1510,7 +1510,7 @@ Bool WindowManager_updateMonitorsExt(
 );
 
 void LWindow_updateMonitors(Window *w) {
- 
+
 	LWindowManager *manager = (LWindowManager*)w->owner->platformData.ptr;
 	LWindow *lwin = WindowExt(w, LWindow);
 
@@ -1861,51 +1861,51 @@ static void LWindow_surfaceEnter(void *data, struct wl_surface *surface, struct 
 	(void) surface;
 	Window  *w    = (Window*) data;
 	LWindow *lwin = WindowExt(w, LWindow);
- 
+
 	//Find the output id from the manager's table
 	LWindowManager *manager = (LWindowManager*)w->owner->platformData.ptr;
 	U32 id = 0;
- 
+
 	for(U32 i = 0; i < LWINDOW_MAX_OUTPUTS; ++i) {
 		if(manager->outputs[i] == output) {
 			id = manager->outputIds[i];
 			break;
 		}
 	}
- 
+
 	if(!id)
 		return;
- 
+
 	//Add to active set if not already present.
 	for(U32 i = 0; i < lwin->activeOutputCount; ++i)
 		if(lwin->activeOutputIds[i] == id)
 			return;
- 
+
 	if(lwin->activeOutputCount < LWINDOW_MAX_OUTPUTS)
 		lwin->activeOutputIds[lwin->activeOutputCount++] = id;
- 
+
 	LWindow_updateMonitors(w);
 }
- 
+
 //wl_surface::leave fires when the surface fully leaves an output.
 static void LWindow_surfaceLeave(void *data, struct wl_surface *surface, struct wl_output *output) {
 	(void) surface;
 	Window  *w    = (Window*) data;
 	LWindow *lwin = WindowExt(w, LWindow);
- 
+
 	LWindowManager *manager = (LWindowManager*)w->owner->platformData.ptr;
 	U32 id = 0;
- 
+
 	for(U32 i = 0; i < LWINDOW_MAX_OUTPUTS; ++i) {
 		if(manager->outputs[i] == output) {
 			id = manager->outputIds[i];
 			break;
 		}
 	}
- 
+
 	if(!id)
 		return;
- 
+
 	//Remove from active set (swap with last)
 	for(U32 i = 0; i < lwin->activeOutputCount; ++i) {
 		if(lwin->activeOutputIds[i] == id) {
@@ -1916,7 +1916,7 @@ static void LWindow_surfaceLeave(void *data, struct wl_surface *surface, struct 
 		}
 	}
 }
- 
+
 static const struct wl_surface_listener LWindow_surfaceListener = {
 	.enter = LWindow_surfaceEnter,
 	.leave = LWindow_surfaceLeave,

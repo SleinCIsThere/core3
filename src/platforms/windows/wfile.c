@@ -43,7 +43,7 @@
 #include <stdio.h>
 
 #define WIN_PATH_MAX (1024 + 4)        // 1023 usable + null + \\?\
- 
+
 //UTF-8 -> UTF-16, / -> \, prepend \\?\ (assumes that buf is WIN_PATH_MAX)
 Bool CharString_toLongPath(wchar_t *buf, const CharString *str, Error *e_rr) {
 
@@ -86,10 +86,10 @@ static Ns Ns_fromFileTime(FILETIME ft) {
 Bool File_getInfoPhysical(const CharString *str, FileInfo *info, const Allocator *alloc, Error *e_rr) {
 
 	Bool s_uccess = true;
- 
+
 	wchar_t buf[WIN_PATH_MAX];
 	gotoIfError3(clean, CharString_toLongPath(buf, str, e_rr));
- 
+
 	WIN32_FILE_ATTRIBUTE_DATA data;
 	if(!GetFileAttributesExW(buf, GetFileExInfoStandard, &data)) {
 
@@ -99,21 +99,21 @@ Bool File_getInfoPhysical(const CharString *str, FileInfo *info, const Allocator
 
 		retError(clean, Error_platformError(0, err, "File_getInfoPhysical() GetFileAttributesExW failed"));
 	}
- 
+
 	EFileType type = data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ? EFileType_Folder : EFileType_File;
- 
+
 	U64 fileSize = type == EFileType_File ? (((U64)data.nFileSizeHigh << 32) | data.nFileSizeLow) : 0;
- 
+
 	CharString path = CharString_createNull();
 	gotoIfError3(clean, CharString_createCopy(*str, alloc, &path, e_rr));
- 
+
 	*info = (FileInfo) {
 		.type         = type,
 		.path         = path,
 		.timestamp    = Ns_fromFileTime(data.ftLastWriteTime),
 		.fileSize     = fileSize
 	};
- 
+
 clean:
 	return s_uccess;
 }
@@ -122,13 +122,13 @@ Bool File_addPhysical(const CharString *str, Bool isFile, const Allocator *alloc
 
 	(void)alloc;
 	Bool s_uccess = true;
- 
+
 	if(!str)
 		retError(clean, Error_nullPointer(0, "File_addPhysical() str is required"));
- 
+
 	wchar_t buf[WIN_PATH_MAX];
 	gotoIfError3(clean, CharString_toLongPath(buf, str, e_rr));
- 
+
 	if(isFile) {
 
 		HANDLE h = CreateFileW(
@@ -157,7 +157,7 @@ Bool File_addPhysical(const CharString *str, Bool isFile, const Allocator *alloc
 
 		retError(clean, Error_platformError(0, err, "File_addPhysical() couldn't create directory"));
 	}
- 
+
 clean:
 	return s_uccess;
 }
@@ -166,29 +166,29 @@ clean:
 static Bool File_removeDirRecursivePhysical(const wchar_t *path, Ns *maxTimeout, Error *e_rr) {
 
 	Bool s_uccess = true;
- 
+
 	//Build glob: path\*
 	wchar_t glob[WIN_PATH_MAX + 2];
 	wcsncpy_s(glob, sizeof(glob) / sizeof(wchar_t), path, WIN_PATH_MAX);
 	wcsncat(glob, L"\\*", 2);
- 
+
 	WIN32_FIND_DATAW ffd;
 	HANDLE hFind = FindFirstFileW(glob, &ffd);
 	if(hFind == INVALID_HANDLE_VALUE)
 		retError(clean, Error_platformError(0, GetLastError(), "File_removePhysical() FindFirstFileW failed"));
- 
+
 	do {
 
 		if(wcscmp(ffd.cFileName, L".") == 0 || wcscmp(ffd.cFileName, L"..") == 0)
 			continue;
- 
+
 		//Build full child path
 		wchar_t child[WIN_PATH_MAX];
 		if(_snwprintf(child, WIN_PATH_MAX, L"%ls\\%ls", path, ffd.cFileName) >= WIN_PATH_MAX - 1) {
 			Log_warnLnx("File_foreach()::path out of bounds. Skipping...");
 			continue;
 		}
- 
+
 		if(ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
 
 			gotoIfError3(clean, File_removeDirRecursivePhysical(child, maxTimeout, e_rr));
@@ -206,9 +206,9 @@ static Bool File_removeDirRecursivePhysical(const wchar_t *path, Ns *maxTimeout,
 			if(!res)
 				retError(clean, Error_platformError(2, GetLastError(), "File_removePhysical() DeleteFileW failed"));
 		}
- 
+
 	} while(FindNextFileW(hFind, &ffd));
- 
+
 clean:
 	if(hFind != INVALID_HANDLE_VALUE) FindClose(hFind);
 	return s_uccess;
@@ -218,17 +218,17 @@ Bool File_removePhysical(const CharString *str, Ns maxTimeout, const Allocator *
 
 	(void)alloc;
 	Bool s_uccess = true;
- 
+
 	if(!str)
 		retError(clean, Error_nullPointer(0, "File_removePhysical() str is required"));
- 
+
 	wchar_t buf[WIN_PATH_MAX];
 	gotoIfError3(clean, CharString_toLongPath(buf, str, e_rr));
- 
+
 	DWORD attrs = GetFileAttributesW(buf);
 	if(attrs == INVALID_FILE_ATTRIBUTES)
 		retError(clean, Error_notFound(0, 0, "File_removePhysical() path not found"));
- 
+
 	if(attrs & FILE_ATTRIBUTE_DIRECTORY) {
 
 		gotoIfError3(clean, File_removeDirRecursivePhysical(buf, &maxTimeout, e_rr));
@@ -247,7 +247,7 @@ Bool File_removePhysical(const CharString *str, Ns maxTimeout, const Allocator *
 		if(!res)
 			retError(clean, Error_platformError(0, GetLastError(), "File_removePhysical() DeleteFileW failed"));
 	}
- 
+
 clean:
 	return s_uccess;
 }
@@ -261,26 +261,26 @@ Bool File_renamePhysical(
 ) {
 	Bool s_uccess = true;
 	CharString dest = CharString_createNull();
- 
+
 	CharString parent = CharString_createNull();
 	if(!CharString_cutAfterLastSensitive(loc, '/', &parent))
 		parent = CharString_createRefCStrConst(".");
- 
+
 	gotoIfError3(clean, CharString_format(alloc, &dest, e_rr, "%.*s/%.*s",
 		CharString_length(parent), parent.ptr,
 		CharString_length(*newFileName), newFileName->ptr
 	));
- 
+
 	wchar_t wSrc[WIN_PATH_MAX], wDst[WIN_PATH_MAX];
 	gotoIfError3(clean, CharString_toLongPath(wSrc, loc, e_rr));
 	gotoIfError3(clean, CharString_toLongPath(wDst, &dest, e_rr));
- 
+
 	Bool res = false;
 	FILE_RETRY_LOOP(maxTimeout, (res = MoveFileExW(wSrc, wDst, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) == false);
- 
+
 	if(!res)
 		retError(clean, Error_stderr(0, "File_renamePhysical() rename failed"));
- 
+
 clean:
 	CharString_free(&dest, alloc);
 	return s_uccess;
@@ -295,20 +295,20 @@ Bool File_movePhysical(
 ) {
 	(void)alloc;
 	Bool s_uccess = true;
- 
+
 	wchar_t wSrc[WIN_PATH_MAX], wDst[WIN_PATH_MAX];
 	gotoIfError3(clean, CharString_toLongPath(wSrc, loc, e_rr));
 	gotoIfError3(clean, CharString_toLongPath(wDst, dest, e_rr));
- 
+
 	Bool res = false;
 
 	FILE_RETRY_LOOP(maxTimeout, (res = MoveFileExW(
 		wSrc, wDst, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH
 	)) == false);
- 
+
 	if(!res)
 		retError(clean, Error_stderr(0, "File_movePhysical() move failed"));
- 
+
 clean:
 	return s_uccess;
 }
@@ -323,19 +323,19 @@ Bool File_openPhysical(
 ) {
 	(void)alloc;
 	Bool s_uccess = true;
- 
+
 	wchar_t buf[WIN_PATH_MAX];
 	gotoIfError3(clean, CharString_toLongPath(buf, resolved, e_rr));
 
 	Bool isRead  = type == EFileOpenType_Read || type == EFileOpenType_ReadWrite;
 	Bool isWrite = type == EFileOpenType_Write || type == EFileOpenType_ReadWrite;
- 
+
 	DWORD access   = (isRead  ? GENERIC_READ  : 0) | (isWrite ? GENERIC_WRITE : 0);
 	DWORD share    = isRead && !isWrite ? FILE_SHARE_READ : 0;    //no sharing for writable
 	DWORD creation = isWrite ? (isRead ? OPEN_ALWAYS : CREATE_ALWAYS) : OPEN_EXISTING;
- 
+
 	HANDLE h = CreateFileW(buf, access, share, NULL, creation, FILE_ATTRIBUTE_NORMAL, NULL);
- 
+
 	Ns maxTimeoutTry = U64_min((maxTimeout + 7) >> 2, 1 * SECOND);
 	while(h == INVALID_HANDLE_VALUE && maxTimeout) {
 		Thread_sleep(maxTimeoutTry);
@@ -343,10 +343,10 @@ Bool File_openPhysical(
 		if(maxTimeout <= maxTimeoutTry) { maxTimeout = 0; break; }
 		maxTimeout -= maxTimeoutTry;
 	}
- 
+
 	if(h == INVALID_HANDLE_VALUE)
 		retError(clean, Error_stderr(0, "File_openPhysical() couldn't open file"));
- 
+
 	U64 fileSize = 0;
 	if(isRead) {
 		LARGE_INTEGER li;
@@ -356,12 +356,12 @@ Bool File_openPhysical(
 		}
 		fileSize = (U64)li.QuadPart;
 	}
- 
+
 	*fileHandle = (FileHandle) {
 		.ext          = (void*)h,
 		.fileSizeType = FileHandle_makeFileSizeType(fileSize, EFileOpenType_create(isRead, isWrite))
 	};
- 
+
 clean:
 	return s_uccess;
 }
@@ -369,16 +369,16 @@ clean:
 Bool FileHandle_writePhysical(FileHandle *handle, U64 offset, U64 length, const Buffer *buf, Error *e_rr) {
 
 	Bool s_uccess = true;
- 
+
 	if(!handle || !buf)
 		retError(clean, Error_nullPointer(!handle ? 0 : 3, "FileHandle_writePhysical() handle and buf are required"));
- 
+
 	HANDLE h = (HANDLE)handle->ext;
- 
+
 	const U8 *src = buf->ptr;
 	U64 remaining = length;
 	U64 currentOffset = offset;
- 
+
 	while(remaining) {
 
 		DWORD toWrite = (DWORD)U64_min(remaining, 64 * MIBI);        //64MB chunks
@@ -393,7 +393,7 @@ Bool FileHandle_writePhysical(FileHandle *handle, U64 offset, U64 length, const 
 		currentOffset += wrote;
 		remaining     -= wrote;
 	}
- 
+
 clean:
 	return s_uccess;
 }
@@ -401,16 +401,16 @@ clean:
 Bool FileHandle_readPhysical(FileHandle *handle, U64 offset, U64 length, Buffer *buf, Error *e_rr) {
 
 	Bool s_uccess = true;
- 
+
 	if(!handle || !buf)
 		retError(clean, Error_nullPointer(!handle ? 0 : 3, "FileHandle_readPhysical() handle and buf are required"));
- 
+
 	HANDLE h = (HANDLE)handle->ext;
- 
+
 	U8 *dst = buf->ptrNonConst;
 	U64 remaining = length;
 	U64 currentOffset = offset;
- 
+
 	while(remaining) {
 
 		DWORD toRead = (DWORD) U64_min(remaining, 64 * MIBI);        //64MB chunks
@@ -425,7 +425,7 @@ Bool FileHandle_readPhysical(FileHandle *handle, U64 offset, U64 length, Buffer 
 		currentOffset += got;
 		remaining     -= got;
 	}
- 
+
 clean:
 	return s_uccess;
 }

@@ -76,13 +76,13 @@ typedef struct GgufValue {
 } GgufValue;
 
 //Element access for arrays. Returns NULL unless the array is of the matching kind.
- 
+
 static inline const CharString *GgufValue_arrayStrings(const GgufValue *value) {
 	return
 		value && value->type == EGgufValueType_Array && value->arrayType == EGgufValueType_String ?
 		(const CharString*) value->arrayStrings.ptr : NULL;
 }
- 
+
 static inline const GgufValue *GgufValue_arrayValues(const GgufValue *value) {
 	return
 		value && value->type == EGgufValueType_Array && value->arrayType == EGgufValueType_Array ?

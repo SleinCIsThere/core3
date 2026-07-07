@@ -37,7 +37,7 @@ void LWindowManager_isAlive(void *data, struct xdg_wm_base *base, U32 serial) {
 	(void) data;
 	xdg_wm_base_pong(base, serial);
 }
- 
+
 //wl_output geometry event, fires once per output on connect, and on change.
 //Gives us the output's position in global compositor space, physical size in mm,
 // and transform (orientation). The pixel mode dimensions come from the mode event
@@ -59,7 +59,7 @@ static void LOutput_geometry(
 	info->transform = transform;
 	info->subpixel  = subpixel;
 }
- 
+
 //wl_output mode event, fires for each supported mode; the one with WL_OUTPUT_MODE_CURRENT
 // set is the active resolution and refresh rate
 static void LOutput_mode(
@@ -70,22 +70,22 @@ static void LOutput_mode(
 	I32 refresh
 ) {
 	(void) output;
- 
+
 	if(!(flags & WL_OUTPUT_MODE_CURRENT))
 		return;
- 
+
 	LOutputInfo *info = (LOutputInfo*) data;
 	info->pixelWidth  = (U16)width;
 	info->pixelHeight = (U16)height;
 	info->refreshRate = refresh;   // mHz
 }
- 
+
 //done event, compositor signals it has finished sending all properties for this output.
 // Nothing to do here; we've already updated info in-place
 static void LOutput_done(void *data, struct wl_output *output) {
 	(void) data; (void) output;
 }
- 
+
 //scale event, integer HiDPI scale factor (e.g. 2 for 200% scaling).
 // Stored for future use; not wired into Monitor yet.
 static void LOutput_scale(void *data, struct wl_output *output, I32 factor) {
@@ -93,7 +93,7 @@ static void LOutput_scale(void *data, struct wl_output *output, I32 factor) {
 	LOutputInfo *info = (LOutputInfo*) data;
 	info->scale = factor;
 }
- 
+
 static const struct wl_output_listener LOutput_listener = {
 	.geometry = LOutput_geometry,
 	.mode     = LOutput_mode,
@@ -116,7 +116,7 @@ static const struct wl_seat_listener LWindowManager_seatListener = {
 	.capabilities = LWindowManager_seatCapabilities,
 	.name         = LWindowManager_seatName
 };
- 
+
 void LWindowManager_register(
 	void *dataVoid,
 	struct wl_registry *registry,
@@ -169,10 +169,10 @@ void LWindowManager_register(
 		for(U32 i = 0; i < LWINDOW_MAX_OUTPUTS; ++i) {
 			if(data->outputs[i])
 				continue;
- 
+
 			data->outputs[i]   = wl_registry_bind(registry, id, &wl_output_interface, 2);
 			data->outputIds[i] = id;
- 
+
 			//Clear the info slot and wire the listener so geometry/mode/done
 			// events populate it before the first window is created.
 			data->outputInfo[i] = (LOutputInfo) { .scale = 1 };

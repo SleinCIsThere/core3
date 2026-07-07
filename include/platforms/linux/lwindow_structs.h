@@ -42,17 +42,17 @@
 #define LWINDOW_RESIZE_BORDER  6
 
 typedef struct LOutputInfo {
- 
+
 	I32 x, y;              //position in compositor global space (for subpixel rendering)
 	I16 mmWidth, mmHeight; //physical size in mm
 	I32 transform;         //wl_output_transform enum value -> EMonitorOrientation
- 
+
 	U16 pixelWidth, pixelHeight;
 	I32 refreshRate;       //mHz (divide by 1000 to get Hz as F32)
- 
+
 	I32 scale;             //HiDPI factor, default 1
 	I32 subpixel;
- 
+
 } LOutputInfo;
 
 typedef struct LWindowManager {
@@ -144,7 +144,7 @@ typedef struct LWindow {
 	struct wl_keyboard      *keyboard;
 	struct xkb_context      *xkbContext;
 	struct xkb_state        *xkbState;
- 
+
 	//Bar pointer (only non-NULL when barSurface is active)
 	struct wl_pointer       *barPointer;
 
@@ -161,7 +161,7 @@ typedef struct LWindow {
 	
 	I32 primaryTouchId;
 	struct wl_touch *touch;
- 
+
 	Window *parent;
 
 } LWindow;

@@ -49,7 +49,7 @@ U32 Window_extSize = 0;
 Bool WindowManager_updateMonitorsExt(ListMonitor *monitors, LPCRECT clip, Error *e_rr);
 
 void WWindow_updateMonitors(Window *w) {
- 
+
 	Bool s_uccess = true;
 	Error err = Error_none(), *e_rr = &err;
 
