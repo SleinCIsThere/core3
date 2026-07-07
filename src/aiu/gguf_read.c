@@ -101,17 +101,25 @@ static void GgufValue_free(GgufValue *value, const Allocator *alloc) {
 
 		case EGgufValueType_Array:
 
-			if(GgufValue_arrayValues(value)) {
+			//Nested arrays own their GgufValue elements; free them recursively first.
+			//String and scalar arrays are backed by one bulk buffer (arrayScalars) plus, for
+			// strings, a ref table (arrayStrings) whose CharStrings point into it and must NOT
+			// be freed individually.
 
-				GgufValue *values = (GgufValue*) value->arrayValuesBuf.ptrNonConst;
+			if(value->arrayType == EGgufValueType_Array) {
 
-				for(U64 i = 0; i < value->arrayCount; ++i)
+				GgufValue *values = (GgufValue*) value->arrayValues.ptrNonConst;
+
+				for(U64 i = 0; i < value->arrayCount && values; ++i)
 					GgufValue_free(&values[i], alloc);
 
-				Buffer_free(&value->arrayValuesBuf, alloc);
+				Buffer_free(&value->arrayValues, alloc);
 			}
 
-			else Buffer_free(&value->arrayScalars, alloc);
+			else {
+				Buffer_free(&value->arrayStrings, alloc);   //Null for scalar arrays; ref table for strings
+				Buffer_free(&value->arrayScalars, alloc);
+			}
 
 			break;
 
@@ -120,6 +128,94 @@ static void GgufValue_free(GgufValue *value, const Allocator *alloc) {
 	}
 
 	*value = (GgufValue) { 0 };
+}
+
+//String array fast path: one bulk read of the whole [U64 len][bytes]* payload, then a table of
+// CharString refs into it. Avoids one allocation per element (tokenizer vocabularies are ~49K
+// strings; the per-element path made debug builds crawl and stressed the allocator in release).
+
+static Bool Gguf_consumeStringArray(
+	StreamCursor *cursor, U64 *it, U64 count, const Allocator *alloc, GgufValue *value, Error *e_rr
+) {
+
+	Bool s_uccess = true;
+
+	const OxStream *stream = RefPtr_data(cursor->stream, OxStream);
+
+	//Pass 1: walk the payload with a scratch offset to size it and validate every length,
+	// without allocating. Each element is U64 len + len bytes; all bounds checked against the
+	// remaining stream, the running total overflow checked.
+
+	U64 scan = *it;
+	U64 payload = 0;
+
+	for(U64 i = 0; i < count; ++i) {
+
+		U64 len;
+		gotoIfError3(clean, StreamCursor_consumeU64(cursor, &scan, &len, alloc, e_rr));
+
+		if(len > stream->size - scan)
+			retError(clean, Error_outOfBounds(
+				0, len, stream->size - scan, "GgufFile_read() string array element exceeds remaining stream"
+			));
+
+		scan += len;
+
+		//payload += sizeof(U64) + len, overflow checked
+
+		if(payload > U64_MAX - sizeof(U64) - len)
+			retError(clean, Error_overflow(0, payload, U64_MAX, "GgufFile_read() string array payload overflow"));
+
+		payload += sizeof(U64) + len;
+	}
+
+	//Ref-table size: count CharStrings. count is already bounded by remaining / sizeof(U64).
+
+	U64 tableSize;
+	gotoIfError3(clean, Gguf_mulU64(count, sizeof(CharString), &tableSize, e_rr));
+
+	//Bulk read the payload, then build the ref table pointing into it.
+
+	if(payload) {
+		gotoIfError3(clean, Buffer_createUninitializedBytes(payload, alloc, &value->arrayScalars, e_rr));
+		gotoIfError3(clean, StreamCursor_consumeBuffer(cursor, it, value->arrayScalars, alloc, e_rr));
+	}
+
+	if(tableSize)
+		gotoIfError3(clean, Buffer_createUninitializedBytes(tableSize, alloc, &value->arrayStrings, e_rr));
+
+	{
+		const U8 *ptr = value->arrayScalars.ptr;
+		CharString *strings = (CharString*) value->arrayStrings.ptrNonConst;
+		U64 off = 0;
+
+		for(U64 i = 0; i < count; ++i) {
+
+			//Length is little endian and may sit at an unaligned offset (previous elements
+			// aren't padded), so assemble it byte-wise rather than dereferencing a U64*.
+
+			U64 len = 0;
+
+			for(U8 b = 0; b < 8; ++b)
+				len |= (U64) ptr[off + b] << (b * 8);
+
+			off += sizeof(U64);
+
+			strings[i] = CharString_createRefSizedConst((const C8*) (ptr + off), len, false);
+			off += len;
+		}
+	}
+
+	*it = scan;
+
+clean:
+
+	if(!s_uccess) {
+		Buffer_free(&value->arrayStrings, alloc);
+		Buffer_free(&value->arrayScalars, alloc);
+	}
+
+	return s_uccess;
 }
 
 static Bool Gguf_consumeValue(
@@ -189,9 +285,8 @@ static Bool Gguf_consumeValue(
 				break;
 			}
 
-			//String or nested array: parse elements out of line.
-			//Bound the allocation by what could possibly fit in the remaining stream
-			// (strings and arrays are >= 8 bytes each on disk).
+			//A string or nested array's element count is bounded first (each element is at
+			// least a U64 on disk), then dispatched.
 
 			if(value->arrayCount > (stream->size - *it) / sizeof(U64))
 				retError(clean, Error_outOfBounds(
@@ -199,11 +294,18 @@ static Bool Gguf_consumeValue(
 					"GgufFile_read() array count exceeds remaining stream"
 				));
 
+			if(elemType == EGgufValueType_String) {    //Bulk read + ref table, no per-element alloc
+				gotoIfError3(clean, Gguf_consumeStringArray(cursor, it, value->arrayCount, alloc, value, e_rr));
+				break;
+			}
+
+			//Nested array: parse elements out of line into owned GgufValues.
+
 			U64 allocSize;
 			gotoIfError3(clean, Gguf_mulU64(value->arrayCount, sizeof(GgufValue), &allocSize, e_rr));
-			gotoIfError3(clean, Buffer_createEmptyBytes(allocSize, alloc, &value->arrayValuesBuf, e_rr));
+			gotoIfError3(clean, Buffer_createEmptyBytes(allocSize, alloc, &value->arrayValues, e_rr));
 
-			GgufValue *values = (GgufValue*) value->arrayValuesBuf.ptrNonConst;
+			GgufValue *values = (GgufValue*) value->arrayValues.ptrNonConst;
 
 			for(U64 i = 0; i < value->arrayCount; ++i)
 				gotoIfError3(clean, Gguf_consumeValue(cursor, it, elemType, depth + 1, alloc, &values[i], e_rr));

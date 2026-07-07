@@ -65,15 +65,29 @@ typedef struct GgufValue {
 		CharString string;      //Owned
 	};
 
-    //Array storage (type == Array). One of these is populated by arrayType:
-    //  scalar elemType  -> arrayBacking holds the tight payload; arrayStrings/arrayValues null
-    //  String           -> arrayBacking holds all [len][bytes]; arrayStrings = refs into it
-    //  Array (nested)   -> arrayValues = arrayCount owned GgufValue elements
-    Buffer arrayBacking;        //Owned; raw bytes for scalar or string arrays
-    CharString *arrayStrings;   //Refs into arrayBacking (string arrays); part of arrayBacking's tail alloc or a second alloc
-    GgufValue *arrayValues;     //Owned (nested arrays only)
+	//Array storage (type == Array). One of these is populated by arrayType:
+	//  scalar elemType  -> arrayBacking holds the tight payload; arrayStrings/arrayValues null
+	//  String           -> arrayBacking holds all [len][bytes]; arrayStrings = refs into it
+	//  Array (nested)   -> arrayValues = arrayCount owned GgufValue elements
+	Buffer arrayScalars;    //Owned; raw bytes for scalar or string arrays
+	Buffer arrayStrings;    //Refs into arrayBacking (string arrays); part of arrayBacking's tail alloc or a second alloc
+	Buffer arrayValues;     //Owned (nested arrays only)
 
 } GgufValue;
+
+//Element access for arrays. Returns NULL unless the array is of the matching kind.
+ 
+static inline const CharString *GgufValue_arrayStrings(const GgufValue *value) {
+	return
+		value && value->type == EGgufValueType_Array && value->arrayType == EGgufValueType_String ?
+		(const CharString*) value->arrayStrings.ptr : NULL;
+}
+ 
+static inline const GgufValue *GgufValue_arrayValues(const GgufValue *value) {
+	return
+		value && value->type == EGgufValueType_Array && value->arrayType == EGgufValueType_Array ?
+		(const GgufValue*) value->arrayValues.ptr : NULL;
+}
 
 typedef struct GgufKv {
 	CharString key;             //Owned

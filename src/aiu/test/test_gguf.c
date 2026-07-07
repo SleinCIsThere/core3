@@ -32,17 +32,20 @@
 //  3. Malformed    - bad magic, bad version, truncated header, oversized string length,
 //                    non-power-of-two alignment, misaligned/overlapping/out-of-bounds tensor
 //                    offsets, duplicate tensor names, row not a multiple of the block size.
+//  4. Optional real gguf
 
 #include "test_aiu_shared.h"
 #include "aiu/gguf_file.h"
-#include "platforms/file.h"
 #include "types/test/test.h"
 #include "types/container/test/basic_alloc.h"
 #include "types/container/memory_stream.h"
 #include "types/container/buffer.h"
 #include "types/container/ref_ptr.h"
 #include "types/math/rand.h"
+#include "types/math/flp.h"
 #include "types/base/mathf.h"
+#include "types/base/constants.h"
+#include "platforms/file.h"
 
 //Wrap the writer's bytes in a read only MemoryStream (region ref; w must outlive the stream)
 
@@ -57,10 +60,7 @@ static Bool GgufWriter_stream(
 //Tiny append-only writer; alignment 16 so the base pointer satisfies the 4 byte contract
 
 typedef struct GgufWriter {
-	union {
-		I32x4 dataAlign[4096 / sizeof(I32x4)];
-		U8 data[4096];
-	};
+	_Alignas(16) U8 data[4096];
 	U64 len;
 } GgufWriter;
 
@@ -105,7 +105,7 @@ static void GgufWriter_tensorInfo(GgufWriter *w, const C8 *name, U64 rows, U64 c
 
 	if(rows > 1) {
 		GgufWriter_u32(w, 2);
-		GgufWriter_u64(w, cols);       //dims[0] = fastest moving = row length
+		GgufWriter_u64(w, cols);    //dims[0] = fastest moving = row length
 		GgufWriter_u64(w, rows);
 	}
 
@@ -156,9 +156,10 @@ static void Test_ggufValid(Test *t) {
 	GgufWriter_str(&w, "test.strings");
 	GgufWriter_u32(&w, EGgufValueType_Array);
 	GgufWriter_u32(&w, EGgufValueType_String);
-	GgufWriter_u64(&w, 2);
+	GgufWriter_u64(&w, 3);
 	GgufWriter_str(&w, "alpha");
 	GgufWriter_str(&w, "beta");
+	GgufWriter_str(&w, "");     //Empty element: zero-length in the bulk-read + ref-table path
 
 	//Tensors: F32 [4], Q4_K [2 x 256], and one of an unsupported ggml type (Q5_K = 13).
 	//Data section: F32 at 0 (16B), Q4_K at 32 (2 blocks = 288B), unknown at 320.
@@ -174,7 +175,6 @@ static void Test_ggufValid(Test *t) {
 
 	for(U64 i = 0; i < 4; ++i)
 		GgufWriter_f32(&w, biasData[i]);
-
 	GgufWriter_align(&w, 32);
 
 	U8 q4kData[288];
@@ -185,7 +185,7 @@ static void Test_ggufValid(Test *t) {
 
 	GgufWriter_bytes(&w, q4kData, sizeof(q4kData));
 	GgufWriter_align(&w, 32);
-	GgufWriter_bytes(&w, q4kData, 16);      //The "exotic" tensor's (opaque) bytes
+	GgufWriter_bytes(&w, q4kData, 16);    //The "exotic" tensor's (opaque) bytes
 
 	const RefPtrType memStreamType = MemoryStream_makeType(t->alloc);
 	MemoryStreamRef *ms = NULL;
@@ -225,14 +225,15 @@ static void Test_ggufValid(Test *t) {
 	);
 
 	kv = GgufFile_findKv(&file, Gguf_key("test.strings"));
-	const GgufValue *strs = kv ? GgufValue_arrayValues(&kv->value) : NULL;
+	const CharString *strs = kv ? GgufValue_arrayStrings(&kv->value) : NULL;
 
-	Test_assert(t, "string array kv", strs && kv->value.arrayCount == 2);
+	Test_assert(t, "string array kv", strs && kv->value.arrayCount == 3);
 
 	Test_assert(
 		t, "string array content",
-		strs && CharString_length(strs[0].string) == 5 && strs[0].string.ptr[0] == 'a' &&
-		CharString_length(strs[1].string) == 4 && strs[1].string.ptr[0] == 'b'
+		strs && CharString_length(strs[0]) == 5 && strs[0].ptr[0] == 'a' &&
+		CharString_length(strs[1]) == 4 && strs[1].ptr[0] == 'b' &&
+		CharString_length(strs[2]) == 0    //Empty element parses to a zero-length ref
 	);
 
 	Test_assert(t, "missing kv", !GgufFile_findKv(&file, Gguf_key("nope")));
@@ -331,7 +332,7 @@ static void Test_ggufValid(Test *t) {
 static Bool Test_ggufExpectFail(Test *t, const GgufWriter *w) {
 
 	GgufFile file = (GgufFile) { 0 };
-	Error err = (Error) { 0 };         //Local: failures here are expected, don't report them
+	Error err = (Error) { 0 };       //Local: failures here are expected, don't report them
 
 	const RefPtrType memStreamType = MemoryStream_makeType(t->alloc);
 	MemoryStreamRef *ms = NULL;
@@ -430,7 +431,7 @@ static void Test_ggufMalformed(Test *t) {
 	GgufWriter_header(&w, EGgufVersion_V3, 1, 0);
 	GgufWriter_tensorInfo(&w, "a", 1, 256, EGgmlType_Q4_K, 0);
 	GgufWriter_align(&w, 32);
-	for(U64 i = 0; i < 32; ++i) GgufWriter_u8(&w, 0);     //144B needed, 32 present
+	for(U64 i = 0; i < 32; ++i) GgufWriter_u8(&w, 0);    //144B needed, 32 present
 	Test_assert(t, "tensor data out of bounds", Test_ggufExpectFail(t, &w));
 
 	//Row length not a multiple of the block element count
@@ -453,8 +454,8 @@ static void Test_ggufMalformed(Test *t) {
 	//Overlapping tensors (offsets must be increasing and non overlapping)
 
 	GgufWriter_header(&w, EGgufVersion_V3, 2, 0);
-	GgufWriter_tensorInfo(&w, "a", 1, 32, EGgmlType_F32, 0);     //128B: 0..128
-	GgufWriter_tensorInfo(&w, "b", 1, 32, EGgmlType_F32, 32);    //Starts inside a
+	GgufWriter_tensorInfo(&w, "a", 1, 32, EGgmlType_F32, 0);    //128B: 0..128
+	GgufWriter_tensorInfo(&w, "b", 1, 32, EGgmlType_F32, 32);   //Starts inside a
 	GgufWriter_align(&w, 32);
 	for(U64 i = 0; i < 256; ++i) GgufWriter_u8(&w, 0);
 	Test_assert(t, "overlapping tensors", Test_ggufExpectFail(t, &w));
@@ -504,7 +505,7 @@ static void Test_ggufMalformed(Test *t) {
 		}
 
 		if(GgufFile_read(truncMs, &truncOff, t->alloc, &truncated, &truncErr)) {
-			sweepOk &= i >= 24;       //Nothing shorter than the header may parse
+			sweepOk &= i >= 24;    //Nothing shorter than the header may parse
 			GgufFile_free(&truncated, t->alloc);
 		}
 
@@ -539,90 +540,95 @@ static void Test_ggufMalformed(Test *t) {
 
 // -- 3. Real model file: SmolLM2-135M-Instruct-Q4_K_S ---------------------------
 //
-// Place the file at  src/aiu/test/models/SmolLM2-135M-Instruct-Q4_K_S.gguf in the repo root
+// Place the file at src/aiu/test/models/SmolLM2-135M-Instruct-Q4_K_S.gguf  in the repo root
 // (download from bartowski/SmolLM2-135M-Instruct-GGUF on HuggingFace, ~102 MB).
 // The test skips gracefully when the file is absent.
 //
 // What is validated:
 //   - Metadata KVs match known model config (architecture, dims, head counts, etc.)
-//   - All 272 tensors have a supported quantType (no EQuantType_Count)
-//   - Specific tensors exist with correct type and element count
+//   - 272 tensors total (tied embeddings: llama.cpp omits output.weight)
+//   - Norm tensors are F32 with the expected element count
+//   - Weight tensors exist with the expected element count and are not F32
+//     (exact quant format is recipe-dependent and not asserted here;
+//      unsupported-type tolerance is covered by Test_ggufValid)
 //   - output_norm.weight (576 F32 values) loads cleanly; all values finite and in
 //     a sane range [-100, 100] (trained RMS norm scales are typically near 1)
 
+//Return the KV value as U64 or 0 on miss/wrong type for compact assert expressions
+
 static U64 Test_ggufModelKvU64(const GgufFile *file, const C8 *key) {
- 
+
 	U64 keyLen = 0;
 	while(key[keyLen]) ++keyLen;
- 
+
 	const GgufKv *kv = GgufFile_findKv(file, CharString_createRefSizedConst(key, keyLen, false));
 	U64 v = 0;
 	return (kv && GgufValue_asU64(&kv->value, &v)) ? v : 0;
 }
 
 static Bool Test_ggufModelKvStr(const GgufFile *file, const C8 *key, const C8 *expected) {
- 
+
 	U64 keyLen = 0;
 	while(key[keyLen]) ++keyLen;
- 
+
 	const GgufKv *kv = GgufFile_findKv(file, CharString_createRefSizedConst(key, keyLen, false));
- 
+
 	if(!kv)
 		return false;
- 
+
 	CharString str;
- 
+
 	if(!GgufValue_asString(&kv->value, &str))
 		return false;
- 
+
 	U64 expLen = 0;
 	while(expected[expLen]) ++expLen;
- 
+
 	return
 		CharString_length(str) == expLen &&
 		Buffer_eq(Buffer_createRefConst(str.ptr, expLen), Buffer_createRefConst(expected, expLen));
 }
 
 static const GgufTensor *Test_ggufModelTensor(const GgufFile *file, const C8 *name) {
- 
+
 	U64 len = 0;
 	while(name[len]) ++len;
- 
+
 	return GgufFile_findTensor(file, CharString_createRefSizedConst(name, len, false));
 }
 
 static void Test_ggufModel(Test *t) {
- 
+
 	Test_setModule(t, "GGUF SmolLM2-135M model file");
- 
+
 	const C8 *pathCStr = "src/aiu/test/models/SmolLM2-135M-Instruct-Q4_K_S.gguf";
 	const CharString path = CharString_createRefCStrConst(pathCStr);
- 
+
 	if(!File_hasFile(&path, t->alloc)) {
 		Test_print(t, "SKIP: src/aiu/test/models/SmolLM2-135M-Instruct-Q4_K_S.gguf not found");
 		Test_print(t, "      Download from bartowski/SmolLM2-135M-Instruct-GGUF on HuggingFace");
 		return;
 	}
- 
+
 	const RefPtrType fileHandleType = FileHandle_makeType(t->alloc);
 	const RefPtrType streamType     = FileStream_makeType(t->alloc);
 	StreamRef *stream = NULL;
- 
+
 	if(!Test_assert(t, "open", File_openStream(
 		&path, 50 * MS, EFileOpenType_Read, false, &fileHandleType, &streamType, &stream, &t->err
 	)))
 		return;
- 
+
 	GgufFile file = (GgufFile) { 0 };
 	U64 streamOff = 0;
- 
+
 	if(!Test_assert(t, "parse", GgufFile_read(stream, &streamOff, t->alloc, &file, &t->err))) {
 		RefPtr_dec(&stream);
 		return;
 	}
- 
-	//Architecture metadata, from the published SmolLM2-135M config.json
- 
+
+	//Architecture metadata, sourced from the published SmolLM2-135M config.json
+
 	Test_assert(t, "architecture",        Test_ggufModelKvStr(&file, "general.architecture",              "llama"));
 	Test_assert(t, "context_length",      Test_ggufModelKvU64(&file, "llama.context_length")              == 8192);
 	Test_assert(t, "embedding_length",    Test_ggufModelKvU64(&file, "llama.embedding_length")            == 576);
@@ -632,16 +638,16 @@ static void Test_ggufModel(Test *t) {
 	Test_assert(t, "head_count_kv",       Test_ggufModelKvU64(&file, "llama.attention.head_count_kv")     == 3);
 	Test_assert(t, "rope_dim",            Test_ggufModelKvU64(&file, "llama.rope.dimension_count")        == 64);
 	Test_assert(t, "tokenizer_model",     Test_ggufModelKvStr(&file, "tokenizer.ggml.model",              "gpt2"));
- 
-	//SmolLM2-135M uses tied embeddings (tie_word_embeddings: true), llama.cpp omits output.weight.
+
+	//SmolLM2-135M uses tied embeddings (tie_word_embeddings: true) llama.cpp omits output.weight.
 	//  token_embd.weight + output_norm.weight = 2 top-level, plus 30 * 9 = 270 per-layer = 272 total.
- 
+
 	Test_assert(t, "tensor_count", file.tensors.length == 272);
- 
+
 	//Specific tensors, types and element counts from the model architecture.
 	//Norm weights must be F32. Weight tensors must not be F32 (some quantized type);
 	//the exact format is recipe-dependent (Q4_K, Q6_K, Q5_K, IQ* all appear in practice).
- 
+
 	const GgufTensor *outputNorm = Test_ggufModelTensor(&file, "output_norm.weight");
 	const GgufTensor *attnNorm0  = Test_ggufModelTensor(&file, "blk.0.attn_norm.weight");
 	const GgufTensor *ffnNorm0   = Test_ggufModelTensor(&file, "blk.0.ffn_norm.weight");
@@ -649,51 +655,51 @@ static void Test_ggufModel(Test *t) {
 	const GgufTensor *attnK0     = Test_ggufModelTensor(&file, "blk.0.attn_k.weight");
 	const GgufTensor *ffnGate0   = Test_ggufModelTensor(&file, "blk.0.ffn_gate.weight");
 	const GgufTensor *tokenEmbd  = Test_ggufModelTensor(&file, "token_embd.weight");
- 
+
 	//Norm weights: F32 vectors of length embedding_length = 576
- 
+
 	Test_assert(t, "output_norm exists",   outputNorm && outputNorm->quantType == EQuantType_F32 && outputNorm->elements == 576);
 	Test_assert(t, "attn_norm.0 exists",   attnNorm0  && attnNorm0->quantType  == EQuantType_F32 && attnNorm0->elements  == 576);
 	Test_assert(t, "ffn_norm.0 exists",    ffnNorm0   && ffnNorm0->quantType   == EQuantType_F32 && ffnNorm0->elements   == 576);
- 
+
 	//Weight tensors: not F32, correct element counts.
 	// dims[0] = fastest-moving = input_features (row length); dims[1] = output_features.
 	// attn_q:   [576, 576]   = [in=embedding, out=n_heads * head_dim = 9 * 64]
 	// attn_k:   [576, 192]   = [in=embedding, out=n_kv_heads * head_dim = 3 * 64]
 	// ffn_gate: [576, 1536]  = [in=embedding, out=intermediate]
 	// token_embd: [576, 49152] = [in=embedding, out=vocab_size]
- 
+
 	Test_assert(t, "attn_q.0 exists",   attnQ0    && attnQ0->quantType    != EQuantType_F32 && attnQ0->elements    == 576 * 576);
 	Test_assert(t, "attn_k.0 exists",   attnK0    && attnK0->quantType    != EQuantType_F32 && attnK0->elements    == 576 * 192);
 	Test_assert(t, "ffn_gate.0 exists", ffnGate0  && ffnGate0->quantType  != EQuantType_F32 && ffnGate0->elements  == 576 * 1536);
 	Test_assert(t, "token_embd exists", tokenEmbd && tokenEmbd->quantType != EQuantType_F32 && tokenEmbd->elements == 576 * 49152);
- 
+
 	//Load output_norm.weight (576 F32 values = 2304 bytes) and validate content.
 	//Trained RMS norm scales are typically near 1; hard bound of 100 catches NaN/Inf/zero.
- 
+
 	if(outputNorm) {
- 
+
 		Buffer normBuf = Buffer_createNull();
 		Test_assert(t, "output_norm load", GgufTensor_readData(&file, outputNorm, t->alloc, &normBuf, &t->err));
- 
+
 		if(Buffer_length(normBuf)) {
- 
+
 			const F32 *vals = (const F32*) normBuf.ptr;
 			Bool allFinite = true, anyNonZero = false;
- 
+
 			for(U64 i = 0; i < 576; ++i) {
 				const F32 v = vals[i];
 				allFinite  &= F32_abs(v) <= 100.0f;   //NaN/Inf fail this; trained weights bounded
 				anyNonZero |= v != 0.0f;
 			}
- 
+
 			Test_assert(t, "output_norm finite",   allFinite);
 			Test_assert(t, "output_norm non-zero",  anyNonZero);
 		}
- 
+
 		Buffer_free(&normBuf, t->alloc);
 	}
- 
+
 	GgufFile_free(&file, t->alloc);
 	RefPtr_dec(&stream);
 }
